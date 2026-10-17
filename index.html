@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Attendance Tracker</title>
+  <style>
+    :root { --blue:#2459b8; --green:#4f823d; --red:#a3211d; --grid:#5b5d63; --bg:#202124; --panel:#303134; --text:#f4f4f5; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:Arial,Helvetica,sans-serif; }
+    .topbar { padding:20px clamp(14px,3vw,32px); background:#292a2d; border-bottom:1px solid #48494e; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
+    h1 { font-size:clamp(21px,3vw,30px); margin:0; font-weight:700; }
+    .sub { color:#c8c9cc; font-size:13px; margin-top:5px; }
+    .controls { padding:16px clamp(14px,3vw,32px); display:grid; grid-template-columns:minmax(260px,1fr) minmax(220px,0.7fr); gap:14px; background:var(--panel); border-bottom:1px solid #48494e; }
+    .field label { display:block; font-weight:700; font-size:13px; margin-bottom:8px; }
+    textarea, input { font:inherit; color:var(--text); background:#17181a; border:1px solid #65676d; border-radius:8px; padding:11px 12px; width:100%; }
+    textarea { min-height:76px; resize:vertical; }
+    .hint { font-size:12px; color:#c5c6c9; margin-top:6px; line-height:1.4; }
+    button { cursor:pointer; border:1px solid #73757b; color:white; background:#34363b; border-radius:8px; padding:10px 14px; font-weight:700; }
+    button:hover { filter:brightness(1.18); }
+    .primary { background:var(--blue); border-color:var(--blue); }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+    .date-tools { display:flex; gap:8px; align-items:center; }
+    .date-tools input { min-width:0; }
+    .legend { display:flex; align-items:center; gap:14px; padding:12px clamp(14px,3vw,32px); font-size:13px; color:#e1e1e4; }
+    .key { display:inline-flex; align-items:center; gap:7px; }
+    .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; }
+    .table-wrap { height:calc(100vh - 310px); min-height:280px; overflow:auto; border-top:1px solid var(--grid); }
+    table { border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; table-layout:fixed; }
+    th, td { border-right:1px solid var(--grid); border-bottom:1px solid var(--grid); height:43px; min-width:112px; text-align:center; padding:0; }
+    thead th { position:sticky; top:0; z-index:4; background:#080808; font-weight:700; }
+    th.name-head { left:0; z-index:7; width:245px; min-width:245px; text-align:left; padding:0 12px; }
+    td.name-cell { position:sticky; left:0; z-index:3; width:245px; min-width:245px; max-width:245px; background:#080808; text-align:left; padding:0 12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    th.section { background:var(--blue); text-align:left; padding-left:12px; position:sticky; left:0; z-index:6; min-width:245px; }
+    th.section-fill { background:var(--blue); min-width:112px; }
+    th.date-head { min-width:112px; padding:0 8px; }
+    .date-head input { border:0; border-radius:0; background:transparent; text-align:center; padding:10px 2px; min-width:100px; }
+    td.status { cursor:pointer; min-width:112px; transition:filter .12s; }
+    td.status:hover { filter:brightness(1.18); outline:2px solid #fff8; outline-offset:-2px; }
+    td.present { background:var(--green); }
+    td.absent { background:var(--red); }
+    td.empty { background:#151619; cursor:default; }
+    .footer { color:#bfc0c4; font-size:12px; padding:12px clamp(14px,3vw,32px); }
+    @media (max-width:700px) {
+      .controls { grid-template-columns:1fr; }
+      .table-wrap { height:calc(100vh - 410px); min-height:260px; }
+      th.name-head, td.name-cell, th.section { width:190px; min-width:190px; max-width:190px; }
+      th,td { min-width:92px; }
+      .date-head input { min-width:82px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div><h1>Attendance Tracker</h1><div class="sub">Click a cell to switch between present and absent.</div></div>
+    <div class="actions" style="margin-top:0">
+      <button id="addDateBtn">+ Add date</button>
+      <button id="exportBtn" class="primary">Export CSV</button>
+    </div>
+  </header>
+  <section class="controls">
+    <div class="field">
+      <label for="namesInput">Names (comma-separated)</label>
+      <textarea id="namesInput" placeholder="Annabel Ang, Anya Teo, Clara Ng, Emma Ong"></textarea>
+      <div class="hint">Paste or type names separated by commas. Applying the list replaces the current names. New cells start red (absent).</div>
+      <div class="actions"><button id="applyNames" class="primary">Apply names</button><button id="clearNames">Clear names</button></div>
+    </div>
+    <div class="field">
+      <label for="dateInput">New date column</label>
+      <div class="date-tools"><input id="dateInput" placeholder="e.g. 18 Jan" aria-label="New date label" /><button id="addDateFromInput">Add</button></div>
+      <div class="hint">Each date is a separate attendance column. You can edit a date by clicking its header.</div>
+      <div class="actions"><button id="markAllPresent">Mark column present</button><button id="markAllAbsent">Mark column absent</button></div>
+      <div class="hint" id="selectedDateHint">Bulk actions apply to the last date column.</div>
+    </div>
+  </section>
+  <div class="legend">
+    <span class="key"><span class="swatch" style="background:var(--green)"></span> Present</span>
+    <span class="key"><span class="swatch" style="background:var(--red)"></span> Absent / not marked</span>
+    <span id="summary" style="margin-left:auto">0 students · 0 dates</span>
+  </div>
+  <main class="table-wrap" id="tableWrap">
+    <table id="attendanceTable" aria-label="Attendance table"></table>
+  </main>
+  <div class="footer">Your attendance data stays in this browser until you export it as CSV. Export regularly to keep a copy.</div>
+<script>
+(() => {
+  let names = [];
+  let dates = ['4 Jan', '11 Jan'];
+  let attendance = {};
+  const table = document.getElementById('attendanceTable');
+  const namesInput = document.getElementById('namesInput');
+  const dateInput = document.getElementById('dateInput');
+  const summary = document.getElementById('summary');
+  const hint = document.getElementById('selectedDateHint');
+
+  function key(name, date) { return name + '\\u0000' + date; }
+  function render() {
+    table.replaceChildren();
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const nameHead = document.createElement('th');
+    nameHead.className = 'name-head';
+    nameHead.textContent = 'Name';
+    headerRow.appendChild(nameHead);
+    dates.forEach((date, index) => {
+      const th = document.createElement('th');
+      th.className = 'date-head';
+      const input = document.createElement('input');
+      input.value = date;
+      input.setAttribute('aria-label', 'Date column ' + (index + 1));
+      input.title = 'Edit date label';
+      input.addEventListener('change', () => {
+        const next = input.value.trim() || ('Date ' + (index + 1));
+        const old = dates[index];
+        if (next !== old && dates.includes(next)) { alert('That date column already exists.'); input.value = old; return; }
+        names.forEach(name => {
+          const oldKey = key(name, old), newKey = key(name, next);
+          if (attendance[oldKey] !== undefined) attendance[newKey] = attendance[oldKey];
+          delete attendance[oldKey];
+        });
+        dates[index] = next;
+        render();
+      });
+      th.appendChild(input);
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    let previousGroup = '';
+    names.forEach(name => {
+      const group = name.group || '';
+      if (group && group !== previousGroup) {
+        const tr = document.createElement('tr');
+        const section = document.createElement('th');
+        section.className = 'section';
+        section.textContent = group;
+        section.scope = 'row';
+        tr.appendChild(section);
+        dates.forEach(() => { const cell = document.createElement('th'); cell.className = 'section-fill'; cell.textContent = ''; tr.appendChild(cell); });
+        tbody.appendChild(tr);
+        previousGroup = group;
+      }
+      const tr = document.createElement('tr');
+      const nameCell = document.createElement('td');
+      nameCell.className = 'name-cell';
+      nameCell.textContent = name.name || name;
+      nameCell.title = name.name || name;
+      tr.appendChild(nameCell);
+      dates.forEach(date => {
+        const td = document.createElement('td');
+        const value = attendance[key(name.name || name, date)] ?? false;
+        td.className = 'status ' + (value ? 'present' : 'absent');
+        td.title = (name.name || name) + ' — ' + date + ': ' + (value ? 'Present' : 'Absent');
+        td.setAttribute('role', 'button');
+        td.setAttribute('aria-label', td.title);
+        td.tabIndex = 0;
+        const toggle = () => { attendance[key(name.name || name, date)] = !value; render(); };
+        td.addEventListener('click', toggle);
+        td.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    summary.textContent = names.length + ' students · ' + dates.length + ' dates';
+    hint.textContent = dates.length ? 'Bulk actions apply to “' + dates[dates.length - 1] + '”.' : 'Add a date column first.';
+    document.getElementById('markAllPresent').disabled = !dates.length || !names.length;
+    document.getElementById('markAllAbsent').disabled = !dates.length || !names.length;
+  }
+
+  function applyNames() {
+    const parsed = namesInput.value.split(',').map(s => s.trim()).filter(Boolean);
+    const unique = [...new Set(parsed)];
+    const oldAttendance = attendance;
+    names = unique;
+    attendance = {};
+    names.forEach(name => dates.forEach(date => {
+      attendance[key(name, date)] = oldAttendance[key(name, date)] ?? false;
+    }));
+    render();
+  }
+  function addDate() {
+    const label = dateInput.value.trim() || ('Date ' + (dates.length + 1));
+    if (dates.includes(label)) { alert('That date column already exists.'); return; }
+    dates.push(label);
+    names.forEach(name => { attendance[key(name, label)] = false; });
+    dateInput.value = '';
+    render();
+  }
+  document.getElementById('applyNames').addEventListener('click', applyNames);
+  document.getElementById('clearNames').addEventListener('click', () => { namesInput.value = ''; names = []; attendance = {}; render(); });
+  document.getElementById('addDateBtn').addEventListener('click', addDate);
+  document.getElementById('addDateFromInput').addEventListener('click', addDate);
+  dateInput.addEventListener('keydown', e => { if (e.key === 'Enter') addDate(); });
+  document.getElementById('markAllPresent').addEventListener('click', () => {
+    const date = dates[dates.length - 1]; if (!date) return;
+    names.forEach(name => attendance[key(name, date)] = true); render();
+  });
+  document.getElementById('markAllAbsent').addEventListener('click', () => {
+    const date = dates[dates.length - 1]; if (!date) return;
+    names.forEach(name => attendance[key(name, date)] = false); render();
+  });
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const quote = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const rows = [['Name', ...dates]];
+    names.forEach(name => rows.push([name, ...dates.map(date => attendance[key(name, date)] ? 'Present' : 'Absent')]));
+    const csv = rows.map(row => row.map(quote).join(',')).join('\\r\\n');
+    const blob = new Blob(['\\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'attendance.csv'; a.click();
+    URL.revokeObjectURL(url);
+  });
+  render();
+})();
+</script>
+</body>
+</html>
