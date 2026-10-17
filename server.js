@@ -143,17 +143,31 @@ app.get('/api/responses', async (req, res) => {
 
     const headers = rows[0];
     const tsCol = findCol(headers, ['timestamp', 'time']);
-    const nameCol = findCol(headers, ['name']);
-    const secCol = findCol(headers, ['section', 'sec']);
-    if (tsCol === -1 || nameCol === -1) {
-      throw new Error('Could not find a Timestamp and a Name column in the sheet');
+    const levelCol = findCol(headers, ['level', 'section', 'sec']);
+    // Google Forms branching repeats the same question text once per
+    // section ("please check the names of those who are present!"), so
+    // there are several columns with that header; only the one matching
+    // the row's Level is filled in.
+    const presentCols = [];
+    headers.forEach(function (h, i) { if (/present/i.test(h)) presentCols.push(i); });
+    if (tsCol === -1 || levelCol === -1 || !presentCols.length) {
+      throw new Error('Could not find Timestamp / Level / a "present" checklist column in the sheet');
+    }
+    function newcomerColFor(sectionLabel) {
+      var norm = sectionLabel.trim().toLowerCase();
+      for (var i = 0; i < headers.length; i++) {
+        var h = headers[i].toLowerCase();
+        if (h.indexOf(norm) > -1 && h.indexOf('newcomer') > -1) return i;
+      }
+      return -1;
+    }
+    function splitNameList(text) {
+      return (text || '').split(/[,\n]/).map(function (s) { return s.trim(); }).filter(Boolean);
     }
 
     const rangeStart = syncRangeStart(now);
 
-    // Bucket every response into the Sunday session it belongs to (sec1-4
-    // all land in the same bucket for that date; the client matches each
-    // name back to whichever section's roster it belongs to).
+    // Bucket every response into the Sunday session it belongs to.
     const buckets = {}; // 'YYYY-MM-DD' (local) -> { label, names: [], bySection: {} }
     let inWindow = 0;
     for (let i = 1; i < rows.length; i++) {
@@ -169,16 +183,28 @@ app.get('/api/responses', async (req, res) => {
       const hour = local.getUTCHours() + local.getUTCMinutes() / 60;
       if (hour < WINDOW_START_HOUR || hour >= WINDOW_END_HOUR) continue; // only the 12:00-15:00 window
 
+      const sectionLabel = (row[levelCol] || '').trim();
+      if (!sectionLabel) continue;
+
+      // Of the several "present" columns, only one is non-empty per row
+      // (the one matching this submission's section).
+      let presentText = '';
+      for (const c of presentCols) {
+        if (row[c] && row[c].trim()) { presentText = row[c]; break; }
+      }
+      const ncCol = newcomerColFor(sectionLabel);
+      const newcomerText = ncCol > -1 ? row[ncCol] : '';
+
+      const names = splitNameList(presentText).concat(splitNameList(newcomerText));
+      if (!names.length) continue;
+
       const key = local.getUTCFullYear() + '-' + pad2(local.getUTCMonth() + 1) + '-' + pad2(local.getUTCDate());
       if (!buckets[key]) buckets[key] = { label: dateLabelFromLocal(local), names: [], bySection: {} };
-      const nm = (row[nameCol] || '').trim();
-      const sec = secCol > -1 ? (row[secCol] || '').trim() : '';
-      if (!nm) continue;
-      if (buckets[key].names.indexOf(nm) === -1) buckets[key].names.push(nm);
-      if (sec) {
-        buckets[key].bySection[sec] = buckets[key].bySection[sec] || [];
-        if (buckets[key].bySection[sec].indexOf(nm) === -1) buckets[key].bySection[sec].push(nm);
-      }
+      buckets[key].bySection[sectionLabel] = buckets[key].bySection[sectionLabel] || [];
+      names.forEach(function (nm) {
+        if (buckets[key].names.indexOf(nm) === -1) buckets[key].names.push(nm);
+        if (buckets[key].bySection[sectionLabel].indexOf(nm) === -1) buckets[key].bySection[sectionLabel].push(nm);
+      });
       inWindow++;
     }
 
