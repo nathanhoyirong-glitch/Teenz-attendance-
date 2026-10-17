@@ -15,7 +15,10 @@ const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Serves files straight from the repo root (where index.html actually lands
+// when uploaded one-by-one via GitHub's mobile "Add file" UI), instead of
+// requiring a public/ subfolder that's easy to lose on mobile uploads.
+app.use(express.static(__dirname));
 
 /* ----------------------------------------------------------------
    Shared, editable app state (names / dates / attendance marks).
