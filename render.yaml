@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: attendance-app
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SHEET_CSV_URL
+        sync: false
+      - key: TZ_OFFSET_HOURS
+        value: "8"
+      - key: WINDOW_START_HOUR
+        value: "12"
+      - key: WINDOW_END_HOUR
+        value: "15"
