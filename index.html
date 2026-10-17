@@ -185,7 +185,7 @@
     <details>
       <summary>Paste a CSV of who was present instead</summary>
       <p style="margin:6px 0">Anyone not listed turns red.</p>
-      <textarea id="present" placeholder="Nathan, Johnny, ..."></textarea>
+      <textarea id="present" placeholder="Name 1, Name 2, ..."></textarea>
       <div class="row" style="margin-top:8px"><button class="ghost" id="applyPresent">Apply CSV</button></div>
     </details>
   </div>
@@ -207,13 +207,24 @@
     var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (saved && saved.dates) { state = saved; hadSaved = true; }
   } catch (e) {}
-  if (!hadSaved) {
-    state.namesText = '# Sec 1\nNathan, Abcd, Johnny\n# Sec 2\n# Sec 3\n# Sec 4';
-    state.dates = [{ label: todayLabel(), present: ['nathan', 'johnny'] }];
-  }
 
   var $ = function (id) { return document.getElementById(id); };
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  // Shared state lives on the server now, so everyone who visits sees (and can
+  // edit) the same board. localStorage is kept only as an offline fallback/cache.
+  var remoteTimer, suppressRemoteSave = false;
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    if (suppressRemoteSave) return;
+    clearTimeout(remoteTimer);
+    remoteTimer = setTimeout(function () {
+      fetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: state })
+      }).catch(function () { /* offline: localStorage still has it */ });
+    }, 400);
+  }
   function norm(s) { return s.trim().replace(/\s+/g, ' ').toLowerCase(); }
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
@@ -476,9 +487,10 @@
         if (changed) { save(); render(); }
         var t = new Date(), p2 = function (x) { return (x < 10 ? '0' : '') + x; };
         var w = data.window || {};
-        setSyncInfo('Last sync ' + p2(t.getHours()) + ':' + p2(t.getMinutes()) + ' · ' + data.inWindow +
-          ' response' + (data.inWindow === 1 ? '' : 's') + ' inside the Sunday ' + (w.start || 12) + ':00–' + (w.end || 15) + ':00 window' +
-          (yellow ? ' · ' + yellow + ' session day' + (yellow === 1 ? '' : 's') + ' with no responses (yellow)' : '') +
+        setSyncInfo('Last sync ' + p2(t.getHours()) + ':' + p2(t.getMinutes()) + ' · ' +
+          (data.sessionCount || data.dates.length) + ' Sunday session' + ((data.sessionCount || data.dates.length) === 1 ? '' : 's') +
+          (data.rangeStart ? ' since ' + data.rangeStart : '') + ' · ' + data.inWindow + ' response' + (data.inWindow === 1 ? '' : 's') +
+          ' (' + (w.start || 12) + ':00–' + (w.end || 15) + ':00 window)' +
           (unmatched.length ? ' · not on your roster: ' + unmatched.join(', ') : '') +
           (data.stale ? ' · (showing older data: ' + data.error + ')' : ''));
         if (manual) toast(changed ? 'Synced: attendance updated' : 'Synced: nothing new');
@@ -624,13 +636,33 @@
   tick(); setInterval(tick, 1000);
   $('syncBtn').onclick = function () { sync(true); };
   $('syncNow').onclick = function () { sync(true); };
-  sync(false);
-  setInterval(function () { sync(false); }, 60000);
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) sync(false); });
 
-  var t0 = findDate(todayLabel());
-  if (t0 > -1) state.selected = t0;
-  render();
+  function finishBoot() {
+    if (!state.dates || !state.dates.length) {
+      if (!state.namesText) state.namesText = '# Sec 1\n# Sec 2\n# Sec 3\n# Sec 4';
+      if (!state.dates || !state.dates.length) {
+        state.dates = [{ label: todayLabel(), present: [] }];
+      }
+    }
+    var t0 = findDate(todayLabel());
+    if (t0 > -1) state.selected = t0;
+    render();
+    sync(false);
+    setInterval(function () { sync(false); }, 60000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) sync(false); });
+  }
+
+  // Pull the shared board from the server before first paint, so every
+  // visitor starts from the same data instead of their own browser's copy.
+  fetch('/api/state').then(function (r) { return r.json(); }).then(function (res) {
+    if (res && res.state && res.state.dates) {
+      suppressRemoteSave = true;
+      state = res.state;
+      hadSaved = true;
+      suppressRemoteSave = false;
+    }
+    finishBoot();
+  }).catch(function () { finishBoot(); });
 })();
 </script>
 </body>
